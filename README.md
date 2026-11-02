@@ -2,6 +2,9 @@
 
 ![FNF Pixel Player Bot](hero.gif)
 
+[**Скачать FNF-Pixel-Player-Bot.exe**](https://github.com/Dezigwer/fnf-roblox-player-bot/releases/latest)
+· Windows, Python не нужен
+
 Оверлейный бот-плеер для FNF (включая Roblox-версии). **В игру ничего не внедряется**:
 программа смотрит на экран, замечает, когда в заданной области меняются пиксели,
 и нажимает назначенную вами клавишу.
