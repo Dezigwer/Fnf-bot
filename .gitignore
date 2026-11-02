@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+
+# личные настройки и скриншоты пользователя
+config.json
+shots/
+error.log
+selftest.log
+
+# сборка
+build/
+dist/
+*.spec
+FNF-Pixel-Player-Bot.exe
