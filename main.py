@@ -25,7 +25,7 @@ def enable_dpi_awareness() -> None:
 def set_app_id() -> None:
     """Отдельная иконка/группа на панели задач, а не «python.exe»."""
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("FNF.PixelPlayerBot.1")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Fnf.Bot.1")
     except Exception:
         pass
 

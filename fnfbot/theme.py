@@ -5,12 +5,10 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from . import glass
-
-BG = glass.KEY          # фон окна: прозрачный ключ, за ним — акрил Windows
-BG_ALT = glass.KEY      # панели тоже стеклянные
-BG_FIELD = "#1a1a1a"    # поля ввода — непрозрачные
-BG_LOG = "#080808"      # журнал
+BG = "#2b2b2b"          # фон окна: обычный серый, без прозрачности
+BG_ALT = "#333333"      # панели
+BG_FIELD = "#1f1f1f"    # поля ввода
+BG_LOG = "#141414"      # журнал
 FG = "#ffffff"          # основной текст
 FG_DIM = "#9a9a9a"      # второстепенный текст
 BORDER = "#2e2e2e"

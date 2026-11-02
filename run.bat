@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title FNF Pixel Player Bot
+title Fnf-bot
 
 if not exist ".venv\Scripts\python.exe" (
     echo First run: creating virtual environment...

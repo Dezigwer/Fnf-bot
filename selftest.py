@@ -582,7 +582,7 @@ def test_color_mode() -> None:
 
 
 def main() -> int:
-    print("FNF Pixel Player Bot — самопроверка\n")
+    print("Fnf-bot — самопроверка\n")
     test_detector()
     test_config_roundtrip()
     test_keys()

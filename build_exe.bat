@@ -17,7 +17,7 @@ if errorlevel 1 goto :fail
 
 echo [3/4] Building one-file EXE...
 ".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed ^
-    --name "FNF-Pixel-Player-Bot" ^
+    --name "Fnf-bot" ^
     --icon "assets\icon.ico" ^
     --add-data "selftest.py;." ^
     --add-data "assets\icon.ico;assets" ^
@@ -27,11 +27,11 @@ echo [3/4] Building one-file EXE...
 if errorlevel 1 goto :fail
 
 echo [4/4] Copying EXE to project root...
-copy /y "dist\FNF-Pixel-Player-Bot.exe" "FNF-Pixel-Player-Bot.exe" >nul
+copy /y "dist\Fnf-bot.exe" "Fnf-bot.exe" >nul
 if errorlevel 1 goto :fail
 
 echo.
-echo Done: FNF-Pixel-Player-Bot.exe
+echo Done: Fnf-bot.exe
 echo You can copy this single file anywhere. config.json and shots\ will appear next to it.
 goto :eof
 

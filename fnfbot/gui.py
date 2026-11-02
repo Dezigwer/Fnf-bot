@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Dict, List, Optional
 
-from . import APP_DIR, RESOURCE_DIR, __version__, glass, theme
+from . import APP_DIR, RESOURCE_DIR, __version__, theme
 from .config import DIRECTIONS, DIR_LABELS, BotConfig
 from .engine import Engine
 from .hotkeys import HotkeyManager, parse_hotkey
@@ -22,7 +22,7 @@ from .shot_editor import ShotEditor, is_modifier, key_name_from_event
 class MainApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title(f"FNF Pixel Player Bot {__version__}")
+        root.title(f"Fnf-bot {__version__}")
         root.geometry("1040x740")
         root.minsize(900, 640)
 
@@ -45,7 +45,6 @@ class MainApp:
 
         self._style()
         self._build()
-        self._glass = glass.enable(self.root)
         self._refresh_ui()
         self._start_hotkeys()
         self._tick()
