@@ -7,11 +7,18 @@ import queue
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import colorchooser, messagebox, ttk
 from typing import Dict, List, Optional
 
-from . import APP_DIR, RESOURCE_DIR, __version__, theme
-from .config import DIRECTIONS, DIR_LABELS, BotConfig
+from . import APP_DIR, RESOURCE_DIR, __version__, theme, wineffects
+from .config import (
+    DEFAULT_NOTE_COLORS,
+    DIRECTIONS,
+    DIR_LABELS,
+    BotConfig,
+    normalize_color,
+    parse_color,
+)
 from .engine import Engine
 from .hotkeys import HotkeyManager, parse_hotkey
 from .overlay import pick_region, show_regions
@@ -32,6 +39,7 @@ class MainApp:
         self._bars: Dict[str, ttk.Progressbar] = {}
         self._base_labels: Dict[str, ttk.Label] = {}
         self._region_labels: Dict[str, ttk.Label] = {}
+        self._note_swatches: Dict[str, tk.Label] = {}
         self.editor: Optional[ShotEditor] = None
         self._loading = False
         self._save_job = None
@@ -45,6 +53,7 @@ class MainApp:
 
         self._style()
         self._build()
+        wineffects.apply(self.root)
         self._refresh_ui()
         self._start_hotkeys()
         self._tick()
@@ -163,6 +172,7 @@ class MainApp:
             "cd": tk.IntVar(value=arrow.cooldown_ms),
             "pix": tk.IntVar(value=arrow.pixel_threshold),
             "color": tk.IntVar(value=arrow.color_threshold),
+            "note_color": tk.StringVar(value=arrow.note_color or DEFAULT_NOTE_COLORS[d]),
             "area": tk.DoubleVar(value=arrow.area_threshold),
             "release": tk.DoubleVar(value=arrow.release_ratio),
             "slide": tk.BooleanVar(value=arrow.slide),
@@ -187,7 +197,23 @@ class MainApp:
             variable=vars_["enabled"],
             command=lambda d=d: self._toggle_note(d),
         ).pack(side="left")
-        ttk.Label(line1, text="клавиша", style="Dim.TLabel").pack(side="left", padx=(16, 4))
+        swatch = tk.Label(
+            line1,
+            text="",
+            width=3,
+            height=1,
+            bg=arrow.note_color or DEFAULT_NOTE_COLORS[d],
+            relief="flat",
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=theme.BORDER,
+            cursor="hand2",
+        )
+        swatch.pack(side="left", padx=(8, 0))
+        swatch.bind("<Button-1>", lambda _e, d=d: self._pick_color_for(d))
+        self._note_swatches[d] = swatch
+        ttk.Label(line1, text="цвет", style="Dim.TLabel").pack(side="left", padx=(3, 8))
+        ttk.Label(line1, text="клавиша", style="Dim.TLabel").pack(side="left", padx=(0, 4))
         entry = ttk.Entry(line1, textvariable=vars_["key"], width=8, justify="center")
         entry.pack(side="left")
         entry.bind("<KeyPress>", lambda e, d=d: self._on_key(e, d))
@@ -281,7 +307,7 @@ class MainApp:
         ).pack(anchor="w")
         theme.DarkRadio(
             detect,
-            text="Цвет — для переливающихся нот",
+            text="Цвет нот — у каждой ноты свой заданный цвет",
             variable=self.mode_detect,
             value="color",
             command=self._apply_general,
@@ -289,8 +315,9 @@ class MainApp:
         ttk.Label(
             detect,
             text=(
-                "Цвет сравнивает каналы RGB: радужная нота ловится при любом "
-                "оттенке. Нужен цветовой эталон — «Калибровать» на паузе."
+                "«Цвет нот» ищет пиксели точного цвета каждой ноты: задайте цвет "
+                "для Лево, Вниз, Вверх и Право (пипеткой прямо с экрана). "
+                "Эталон для этого режима не нужен."
             ),
             style="Dim.TLabel",
             wraplength=380,
@@ -379,7 +406,17 @@ class MainApp:
 
         body = ttk.Frame(tune)
         body.pack(fill="x", pady=(8, 0))
-        self.tune_thumb = tk.Label(body, bg=theme.BG_FIELD, width=56, height=56, fg=theme.FG_DIM)
+        # Canvas, а не Label: у Label ширина/высота считаются в символах,
+        # и «56» превращалось в гигантский пустой прямоугольник.
+        self.tune_thumb = tk.Canvas(
+            body,
+            width=56,
+            height=56,
+            bg=theme.BG_FIELD,
+            highlightthickness=1,
+            highlightbackground=theme.BORDER,
+            bd=0,
+        )
         self.tune_thumb.pack(side="left", padx=(0, 10))
 
         grid = ttk.Frame(body)
@@ -445,15 +482,54 @@ class MainApp:
         self.tune_hmax.bind("<FocusOut>", lambda _e: self._apply_tune())
         self.tune_hmax.bind("<Return>", lambda _e: self._apply_tune())
 
-        ttk.Label(grid, text="Порог цвета (0–255):").grid(row=6, column=0, sticky="w", pady=(4, 0))
-        self.tune_color = ttk.Spinbox(grid, from_=5, to=254, increment=5, width=8)
-        self.tune_color.grid(row=6, column=1, sticky="w", padx=8, pady=(4, 0))
+        ttk.Label(grid, text="Цвет ноты:").grid(row=6, column=0, sticky="w", pady=(6, 0))
+        color_row = ttk.Frame(grid)
+        color_row.grid(row=6, column=1, sticky="ew", padx=8, pady=(6, 0))
+        self.tune_swatch = tk.Label(
+            color_row,
+            text="",
+            width=3,
+            height=1,
+            bg=DEFAULT_NOTE_COLORS["left"],
+            relief="flat",
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=theme.BORDER,
+            cursor="hand2",
+        )
+        self.tune_swatch.pack(side="left")
+        self.tune_swatch.bind("<Button-1>", lambda _e: self._choose_color_dialog())
+        self.tune_color_hex = ttk.Entry(color_row, width=9, justify="center")
+        self.tune_color_hex.pack(side="left", padx=(6, 0))
+        self.tune_color_hex.bind("<FocusOut>", lambda _e: self._apply_tune())
+        self.tune_color_hex.bind("<Return>", lambda _e: self._apply_tune())
+        ttk.Button(
+            color_row,
+            text="Пипетка",
+            command=lambda: self._pick_color_for(self._tune_note.get()),
+        ).pack(side="left", padx=(6, 0))
+
+        ttk.Label(grid, text="Допуск цвета (0–255):").grid(
+            row=7, column=0, sticky="w", pady=(4, 0)
+        )
+        self.tune_color = ttk.Spinbox(grid, from_=1, to=255, increment=5, width=8)
+        self.tune_color.grid(row=7, column=1, sticky="w", padx=8, pady=(4, 0))
         self.tune_color.bind("<FocusOut>", lambda _e: self._apply_tune())
         self.tune_color.bind("<Return>", lambda _e: self._apply_tune())
 
         ttk.Button(grid, text="Проверить нажатие", command=self._test_tune_key).grid(
-            row=7, column=1, sticky="w", padx=8, pady=(6, 0)
+            row=8, column=1, sticky="w", padx=8, pady=(6, 0)
         )
+        ttk.Label(
+            tune,
+            text=(
+                "Для режима «Цвет нот»: нажмите «Пипетка» и кликните по ноте в игре — "
+                "цвет возьмётся с экрана. Допуск 40–80 ловит ноту с тенью и подсветкой."
+            ),
+            style="Dim.TLabel",
+            wraplength=400,
+            justify="left",
+        ).pack(anchor="w", pady=(8, 0))
 
         # --- горячие клавиши ---
         hot = ttk.LabelFrame(right, text="Горячие клавиши", padding=10)
@@ -517,6 +593,7 @@ class MainApp:
                 v["cd"].set(arrow.cooldown_ms)
                 v["pix"].set(arrow.pixel_threshold)
                 v["color"].set(arrow.color_threshold)
+                v["note_color"].set(arrow.note_color or DEFAULT_NOTE_COLORS[d])
                 v["area"].set(arrow.area_threshold)
                 v["release"].set(arrow.release_ratio)
                 v["slide"].set(arrow.slide)
@@ -550,7 +627,11 @@ class MainApp:
             self._region_labels[d].configure(style="Dim.TLabel")
 
         base = arrow.get_baseline()
-        if base is None:
+        if self.cfg.detect_mode == "color":
+            color = (arrow.note_color or DEFAULT_NOTE_COLORS[d]).upper()
+            v["base"].set(f"цвет: {color}")
+            self._base_labels[d].configure(style="Ok.TLabel")
+        elif base is None:
             v["base"].set("эталон: нет")
             self._base_labels[d].configure(style="Warn.TLabel")
         else:
@@ -575,7 +656,15 @@ class MainApp:
             self._base_labels[d].configure(
                 style="Warn.TLabel" if flat and not dark_flat else "Ok.TLabel"
             )
+        color = arrow.note_color or DEFAULT_NOTE_COLORS[d]
+        swatch = self._note_swatches.get(d)
+        if swatch is not None:
+            try:
+                swatch.configure(bg=color)
+            except Exception:
+                pass
         self._update_tune_thumb()
+        self._update_tune_color()
 
     def _update_tune_thumb(self) -> None:
         try:
@@ -584,9 +673,29 @@ class MainApp:
             return
         if not hasattr(self, "tune_thumb"):
             return
+        if self.cfg.detect_mode == "color":
+            color = self.cfg.arrows[d].note_color or DEFAULT_NOTE_COLORS[d]
+            rgb = parse_color(color) or (0, 0, 0)
+            self.tune_thumb.delete("all")
+            self.tune_thumb.create_rectangle(0, 0, 56, 56, fill=color, outline="")
+            # подпись читаемая на любом фоне
+            ink = "#000000" if (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) > 140000 else "#ffffff"
+            self.tune_thumb.create_text(
+                28, 28, text=color.upper().lstrip("#"), fill=ink, font=("Consolas", 7)
+            )
+            self.tune_thumb.image = None
+            return
         base = self.cfg.arrows[d].get_baseline()
         if base is None:
-            self.tune_thumb.configure(image="", text="нет\nэталона", width=56, height=56)
+            self.tune_thumb.delete("all")
+            self.tune_thumb.create_text(
+                28,
+                28,
+                text="нет\nэталона",
+                fill=theme.FG_DIM,
+                font=("Segoe UI", 8),
+                justify="center",
+            )
             self.tune_thumb.image = None
             return
         try:
@@ -595,8 +704,23 @@ class MainApp:
             img = Image.fromarray(base).convert("RGB")
             img = img.resize((56, 56), Image.NEAREST)
             photo = ImageTk.PhotoImage(img)
-            self.tune_thumb.configure(image=photo, text="", width=56, height=56)
+            self.tune_thumb.delete("all")
+            self.tune_thumb.create_image(0, 0, image=photo, anchor="nw")
             self.tune_thumb.image = photo
+        except Exception:
+            pass
+
+    def _update_tune_color(self) -> None:
+        """Красит образец цвета рядом с полем «Цвет ноты»."""
+        if not hasattr(self, "tune_swatch"):
+            return
+        try:
+            color = self.ui[self._tune_note.get()]["note_color"].get()
+        except Exception:
+            return
+        rgb = parse_color(color)
+        try:
+            self.tune_swatch.configure(bg=normalize_color(color) if rgb else theme.BG_FIELD)
         except Exception:
             pass
 
@@ -614,12 +738,14 @@ class MainApp:
         self.tune_grace.configure(textvariable=v["grace"])
         self.tune_hmax.configure(textvariable=v["hmax"])
         self.tune_color.configure(textvariable=v["color"])
+        self.tune_color_hex.configure(textvariable=v["note_color"])
         pix = int(v["pix"].get())
         self._pix_var.set(float(pix))
         self.pix_value.configure(text=str(pix))
         self.tune_area.configure(variable=v["area"])
         self.area_value.configure(text=f"{float(v['area'].get()):.1f}")
         self._update_tune_thumb()
+        self._update_tune_color()
 
     def _apply(self, d: str) -> None:
         if self._loading:
@@ -641,9 +767,14 @@ class MainApp:
         except (tk.TclError, ValueError):
             pass
         try:
-            arrow.color_threshold = max(1, min(254, int(float(v["color"].get()))))
+            arrow.color_threshold = max(1, min(255, int(float(v["color"].get()))))
         except (tk.TclError, ValueError):
             pass
+        raw_color = str(v["note_color"].get()).strip()
+        if parse_color(raw_color) is not None:
+            arrow.note_color = normalize_color(raw_color)
+        # некорректный ввод возвращаем к сохранённому цвету
+        v["note_color"].set(arrow.note_color or DEFAULT_NOTE_COLORS[d])
         try:
             arrow.area_threshold = max(0.1, min(100.0, float(v["area"].get())))
         except (tk.TclError, ValueError):
@@ -709,7 +840,116 @@ class MainApp:
             self.cfg.loop_delay_ms = max(0, min(200, int(float(self.loop_delay_var.get()))))
         except (tk.TclError, ValueError):
             pass
+        for d in DIRECTIONS:
+            self._update_labels(d)
         self._schedule_save()
+
+    # ---------- цвет ноты ----------
+    def _choose_color_dialog(self) -> None:
+        try:
+            d = self._tune_note.get()
+        except Exception:
+            return
+        current = normalize_color(self.ui[d]["note_color"].get())
+        try:
+            rgb, _hex = colorchooser.askcolor(
+                color=current,
+                title=f"Цвет ноты: {DIR_LABELS[d]}",
+                parent=self.root,
+            )
+        except Exception as exc:
+            self._log(f"Не удалось открыть выбор цвета: {exc}")
+            return
+        if not rgb:
+            return
+        color = "#{:02x}{:02x}{:02x}".format(*(int(c) for c in rgb))
+        self._set_note_color(d, color)
+
+    def _set_note_color(self, d: str, color: str) -> None:
+        """Сохраняет цвет ноты и обновляет все образцы."""
+        color = normalize_color(color)
+        self._tune_note.set(d)
+        self.ui[d]["note_color"].set(color)
+        self._sync_tune_widgets()
+        self._apply(d)
+        self._update_tune_color()
+        rgb = parse_color(color) or (0, 0, 0)
+        self._log(
+            f"{DIR_LABELS[d]}: цвет ноты {color.upper()} (R{rgb[0]} G{rgb[1]} B{rgb[2]})"
+        )
+
+    def _pick_color_for(self, d: str) -> None:
+        """Пипетка: клик по экрану берёт цвет пикселя прямо из игры."""
+        if self.engine is not None and self.engine.is_alive():
+            self._log("Пипетка недоступна во время работы бота — сначала «Стоп»")
+            return
+        sw, sh = screen_size()
+        top = tk.Toplevel(self.root)
+        top.withdraw()
+        top.overrideredirect(True)
+        top.attributes("-topmost", True)
+        top.attributes("-alpha", 0.02)
+        top.configure(bg="#000000", cursor="crosshair")
+        top.geometry(f"{sw}x{sh}+0+0")
+
+        canvas = tk.Canvas(
+            top, bg="#000000", highlightthickness=0, bd=0, cursor="crosshair"
+        )
+        canvas.pack(fill="both", expand=True)
+        canvas.create_text(
+            sw // 2,
+            30,
+            text=(
+                f"Пипетка: кликните по ноте «{DIR_LABELS[d]}» в игре · Esc — отмена"
+            ),
+            fill="#ffffff",
+            font=("Segoe UI", 14, "bold"),
+            width=sw - 80,
+            justify="center",
+        )
+
+        result = {"xy": None}
+
+        def on_click(event):
+            result["xy"] = (int(event.x_root), int(event.y_root))
+            close()
+
+        def close(_event=None):
+            try:
+                top.destroy()
+            except Exception:
+                pass
+
+        canvas.bind("<Button-1>", on_click)
+        top.bind("<Escape>", close)
+        top.deiconify()
+        top.lift()
+        top.attributes("-topmost", True)
+        top.focus_force()
+        try:
+            top.grab_set()
+        except Exception:
+            pass
+        top.wait_window(top)
+
+        xy = result["xy"]
+        if xy is None:
+            return
+        # окно-пипетка уже закрыто: даём Windows перерисовать кадр и берём пиксель
+        self.root.after(150, lambda: self._grab_pixel_color(d, xy))
+
+    def _grab_pixel_color(self, d: str, xy) -> None:
+        try:
+            from PIL import ImageGrab
+
+            x, y = xy
+            image = ImageGrab.grab(bbox=(x, y, x + 1, y + 1))
+            pixel = image.convert("RGB").getpixel((0, 0))
+            color = "#{:02x}{:02x}{:02x}".format(*pixel[:3])
+        except Exception as exc:
+            self._log(f"Не удалось взять цвет с экрана: {exc}")
+            return
+        self._set_note_color(d, color)
 
     def _schedule_save(self) -> None:
         if self._closing:
@@ -758,7 +998,13 @@ class MainApp:
                     f"{label}: кулдаун {a.cooldown_ms} мс — частые ноты будут пропускаться. "
                     "Поставьте 40–80 мс."
                 )
-            if not a.has_baseline():
+            if self.cfg.detect_mode == "color":
+                if parse_color(a.note_color) is None:
+                    issues.append(
+                        f"{label}: не задан цвет ноты — в режиме «Цвет нот» она "
+                        "не будет срабатывать."
+                    )
+            elif not a.has_baseline():
                 issues.append(f"{label}: нет эталона — нота не будет срабатывать.")
             else:
                 base = a.get_baseline()

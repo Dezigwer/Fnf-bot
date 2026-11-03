@@ -8,8 +8,6 @@ import time
 from collections import deque
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
-
 from .capture import RegionGrabber
 from .config import DIRECTIONS, DIR_LABELS, BotConfig
 from .detector import ArrowDetector, ColorDetector
@@ -135,25 +133,28 @@ class Engine(threading.Thread):
             self.log(
                 "Слайды: держим клавишу, пока нота/хвост виден в приёмнике"
             )
-        if cfg.detect_mode == "color":
-            self.log("Режим распознавания: по цвету (для переливающихся нот)")
-
         color_mode = cfg.detect_mode == "color"
+        if color_mode:
+            self.log(
+                "Режим распознавания: по точному цвету нот (цвет каждой ноты — в настройках)"
+            )
+
         detectors: Dict[str, object] = {}
         for d in dirs:
-            det = ColorDetector(cfg.arrows[d]) if color_mode else ArrowDetector(cfg.arrows[d])
+            arrow = cfg.arrows[d]
+            det = ColorDetector(arrow) if color_mode else ArrowDetector(arrow)
             detectors[d] = det
-            if not det.has_baseline:
-                if color_mode:
+            if color_mode:
+                if not det.has_baseline:
                     self.log(
-                        f"{DIR_LABELS[d]}: нет цветового эталона — нажмите «Калибровать» "
-                        "на паузе или подождите: бот снимет его сам, когда приёмник пуст"
+                        f"{DIR_LABELS[d]}: не задан цвет ноты — откройте «Настройки» → "
+                        "«Нота: чувствительность» и укажите цвет (или возьмите пипеткой)"
                     )
-                else:
-                    self.log(
-                        f"{DIR_LABELS[d]}: нет эталона — нажмите «Калибровать» "
-                        "или примените скриншот"
-                    )
+            elif not det.has_baseline:
+                self.log(
+                    f"{DIR_LABELS[d]}: нет эталона — нажмите «Калибровать» "
+                    "или примените скриншот"
+                )
         bad_keys = [DIR_LABELS[d] for d in dirs if not cfg.arrows[d].key]
         if bad_keys:
             self.log("Не назначены клавиши: " + ", ".join(bad_keys))
@@ -178,8 +179,6 @@ class Engine(threading.Thread):
             self.log("Бот запущен. F9 / кнопка «Стоп» — выключить")
 
         last_canvas_shape: Dict[str, Tuple[int, int]] = {}
-        prev_frames: Dict[str, np.ndarray] = {}
-        quiet_frames: Dict[str, int] = {}
         try:
             while not self._stop_event.is_set():
                 frame_start = time.perf_counter()
@@ -210,29 +209,7 @@ class Engine(threading.Thread):
                                 "эталон подстроен автоматически"
                             )
 
-                    # Цветовой режим без эталона: снимаем сами, как только
-                    # картинка в приёмнике перестала меняться (нот нет).
-                    if color_mode and not det.has_baseline:
-                        prev = prev_frames.get(d)
-                        if prev is not None and prev.shape == frame.shape:
-                            moving = np.abs(
-                                frame.astype(np.int16) - prev.astype(np.int16)
-                            ).max(axis=2)
-                            quiet_now = int(np.count_nonzero(moving > 12)) * 100.0 / max(
-                                1, moving.size
-                            ) < 1.0
-                        else:
-                            quiet_now = False
-                        prev_frames[d] = frame
-                        quiet_frames[d] = quiet_frames.get(d, 0) + 1 if quiet_now else 0
-                        if quiet_frames[d] >= 8:
-                            arrow.set_baseline_rgb(frame, "screen")
-                            det.reload_baseline()
-                            quiet_frames[d] = 0
-                            self.log(
-                                f"{DIR_LABELS[d]}: цветовой эталон снят с экрана"
-                            )
-
+                    # Цветному режиму эталон не нужен: цвет ноты задан в настройках.
                     score = det.score(frame)
                     threshold = max(0.1, float(arrow.area_threshold))
                     state["score"] = score
@@ -242,9 +219,13 @@ class Engine(threading.Thread):
                     above = score >= threshold
                     was_above = self._above[d]
 
-                    # Удержание: сигнал берём из самого приёмника — пока там видна
-                    # нота или хвост слайдера, клавиша нажата.
-                    if hold.active and hold.update(now, above):
+                    # Удержание: сигнал берём из самого приёмника. Хвост слайдера
+                    # тоньше головы и может не добирать «Мин. площадь», поэтому
+                    # при уже зажатой клавише используем пониженный порог — иначе
+                    # бот отпускает слайд как обычную ноту.
+                    hold_floor = max(0.05, threshold * 0.35)
+                    hold_signal = above or (hold.active and score >= hold_floor)
+                    if hold.active and hold.update(now, hold_signal):
                         forced = hold.held_for(now) >= arrow.hold_max_ms / 1000.0 - 0.02
                         if self._sender is not None and arrow.key:
                             self._sender.key_up(arrow.key)
@@ -323,9 +304,12 @@ class Engine(threading.Thread):
         for d, key, _score, slide in presses:
             # Клавиша могла остаться зажатой от прошлой ноты: игра игнорирует
             # key_down по уже нажатой клавише, поэтому сначала отпускаем.
-            if slide and self._held_key.get(d):
+            if self._held_key.get(d):
                 sender.key_up(key)
                 self._held_key[d] = False
+            # Отложенное отпускание этого же ключа оборвало бы новое нажатие.
+            if any(k == key for _w, k in self._pending):
+                self._pending = [(w, k) for (w, k) in self._pending if k != key]
             keys.append(key)
 
         sender.key_down_many(keys)

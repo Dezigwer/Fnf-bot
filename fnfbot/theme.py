@@ -1,25 +1,25 @@
-"""Тёмная тема в стиле Windows 11 (ttk + tk), без эмодзи."""
+"""Тёмная тема в стиле Windows 11: чёрный фон, белые плоские кнопки."""
 
 from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
 
-BG = "#2b2b2b"          # фон окна: обычный серый, без прозрачности
-BG_ALT = "#333333"      # панели
-BG_FIELD = "#1f1f1f"    # поля ввода
-BG_LOG = "#141414"      # журнал
+BG = "#000000"          # фон окна: чистый чёрный, без прозрачности
+BG_ALT = "#0f0f0f"      # панели и строка состояния
+BG_FIELD = "#1a1a1a"    # поля ввода
+BG_LOG = "#0b0b0b"      # журнал
 FG = "#ffffff"          # основной текст
-FG_DIM = "#9a9a9a"      # второстепенный текст
-BORDER = "#2e2e2e"
-ACCENT = "#c8c8c8"      # монохромный акцент (без синего)
-ACCENT_HOVER = "#e6e6e6"
-ACCENT_PRESSED = "#8a8a8a"
-BTN = "#3a3a3a"         # серая кнопка
-BTN_HOVER = "#4a4a4a"
-BTN_PRESSED = "#2a2a2a"
+FG_DIM = "#a6a6a6"      # второстепенный текст
+BORDER = "#2b2b2b"
+ACCENT = "#ffffff"      # белый акцент
+ACCENT_HOVER = "#e8e8e8"
+ACCENT_PRESSED = "#c7c7c7"
+BTN = "#ffffff"         # белая плоская кнопка
+BTN_HOVER = "#ececec"
+BTN_PRESSED = "#d0d0d0"
 OK = "#ffffff"
-WARN = "#a8a8a8"
+WARN = "#bdbdbd"
 
 
 def apply(root: tk.Misc) -> ttk.Style:
@@ -44,7 +44,7 @@ def apply(root: tk.Misc) -> ttk.Style:
         troughcolor=BG_FIELD,
         focuscolor=ACCENT,
         selectbackground=ACCENT,
-        selectforeground="#ffffff",
+        selectforeground="#000000",
         font=("Segoe UI", 9),
     )
 
@@ -68,19 +68,21 @@ def apply(root: tk.Misc) -> ttk.Style:
     style.configure(
         "TButton",
         background=BTN,
-        foreground=FG,
-        bordercolor=BORDER,
+        foreground="#000000",
+        bordercolor=BTN,
         lightcolor=BTN,
         darkcolor=BTN,
         focusthickness=1,
         relief="flat",
-        padding=(10, 5),
+        padding=(14, 7),
     )
     style.map(
         "TButton",
-        background=[("pressed", BTN_PRESSED), ("active", BTN_HOVER), ("disabled", "#1e1e1e")],
-        foreground=[("disabled", "#6b6b6b")],
-        bordercolor=[("focus", ACCENT), ("active", "#555555")],
+        background=[("pressed", BTN_PRESSED), ("active", BTN_HOVER), ("disabled", "#242424")],
+        foreground=[("disabled", "#7a7a7a"), ("active", "#000000"), ("pressed", "#000000")],
+        bordercolor=[("focus", "#bdbdbd"), ("active", BTN_HOVER), ("pressed", BTN_PRESSED)],
+        lightcolor=[("active", BTN_HOVER), ("pressed", BTN_PRESSED)],
+        darkcolor=[("active", BTN_HOVER), ("pressed", BTN_PRESSED)],
     )
 
     style.configure(
@@ -90,13 +92,13 @@ def apply(root: tk.Misc) -> ttk.Style:
         bordercolor=ACCENT,
         lightcolor=ACCENT,
         darkcolor=ACCENT,
-        padding=(12, 5),
+        padding=(16, 7),
     )
     style.map(
         "Accent.TButton",
         background=[("pressed", ACCENT_PRESSED), ("active", ACCENT_HOVER)],
         bordercolor=[("pressed", ACCENT_PRESSED), ("active", ACCENT_HOVER)],
-        foreground=[("disabled", "#4a4a4a")],
+        foreground=[("disabled", "#7a7a7a")],
     )
 
     style.configure(
@@ -107,11 +109,13 @@ def apply(root: tk.Misc) -> ttk.Style:
         bordercolor=BORDER,
         lightcolor=BORDER,
         darkcolor=BORDER,
-        padding=(6, 4),
+        padding=(8, 5),
     )
     style.map(
         "TEntry",
         bordercolor=[("focus", ACCENT)],
+        lightcolor=[("focus", ACCENT)],
+        darkcolor=[("focus", ACCENT)],
         fieldbackground=[("readonly", BG_ALT)],
     )
 
@@ -123,23 +127,27 @@ def apply(root: tk.Misc) -> ttk.Style:
         bordercolor=BORDER,
         lightcolor=BORDER,
         darkcolor=BORDER,
-        padding=(4, 3),
+        padding=(6, 4),
     )
-    style.map("TSpinbox", bordercolor=[("focus", ACCENT)])
+    style.map(
+        "TSpinbox",
+        bordercolor=[("focus", ACCENT)],
+        arrowcolor=[("active", "#000000")],
+    )
 
     style.configure("TCheckbutton", background=BG, foreground=FG)
     style.map("TCheckbutton", background=[("active", BG)])
     style.configure("TRadiobutton", background=BG, foreground=FG)
     style.map("TRadiobutton", background=[("active", BG)])
 
-    style.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(0, 4, 0, 0))
+    style.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(0, 6, 0, 0))
     style.configure(
         "TNotebook.Tab",
         background=BG_ALT,
         foreground=FG_DIM,
-        padding=(14, 6),
-        borderwidth=1,
-        bordercolor=BORDER,
+        padding=(18, 8),
+        borderwidth=0,
+        bordercolor=BG_ALT,
         lightcolor=BG_ALT,
         darkcolor=BG_ALT,
     )
@@ -147,14 +155,16 @@ def apply(root: tk.Misc) -> ttk.Style:
         "TNotebook.Tab",
         background=[("selected", BG_FIELD)],
         foreground=[("selected", FG)],
-        bordercolor=[("selected", ACCENT)],
+        bordercolor=[("selected", BG_FIELD)],
+        lightcolor=[("selected", BG_FIELD)],
+        darkcolor=[("selected", BG_FIELD)],
     )
 
     style.configure(
         "Horizontal.TProgressbar",
         background=ACCENT,
-        troughcolor="#262626",
-        bordercolor=BORDER,
+        troughcolor="#1f1f1f",
+        bordercolor="#1f1f1f",
         lightcolor=ACCENT,
         darkcolor=ACCENT,
         thickness=10,
@@ -163,16 +173,16 @@ def apply(root: tk.Misc) -> ttk.Style:
     for orient in ("Vertical", "Horizontal"):
         style.configure(
             f"{orient}.TScrollbar",
-            background="#3d3d3d",
+            background="#3a3a3a",
             troughcolor=BG,
             bordercolor=BG,
             arrowcolor=FG_DIM,
-            lightcolor="#3d3d3d",
-            darkcolor="#3d3d3d",
+            lightcolor="#3a3a3a",
+            darkcolor="#3a3a3a",
         )
         style.map(
             f"{orient}.TScrollbar",
-            background=[("active", "#4d4d4d"), ("pressed", ACCENT)],
+            background=[("active", "#5a5a5a"), ("pressed", "#8a8a8a")],
         )
 
     style.configure("TSeparator", background=BORDER)
@@ -186,10 +196,10 @@ def apply(root: tk.Misc) -> ttk.Style:
 def style_text(widget: tk.Text) -> None:
     widget.configure(
         bg=BG_LOG,
-        fg="#d6d6d6",
+        fg="#dcdcdc",
         insertbackground=FG,
         selectbackground=ACCENT,
-        selectforeground="#ffffff",
+        selectforeground="#000000",
         highlightthickness=1,
         highlightbackground=BORDER,
         highlightcolor=BORDER,
@@ -199,15 +209,15 @@ def style_text(widget: tk.Text) -> None:
 
 
 def style_scale(style: ttk.Style) -> None:
-    """Монохромный ползунок: светлый бегунок на почти чёрном жёлобе."""
+    """Белый бегунок на почти чёрном жёлобе, без объёма."""
     style.configure(
         "Mono.Horizontal.TScale",
-        background="#c8c8c8",
-        troughcolor="#101010",
-        bordercolor=BORDER,
-        lightcolor="#f0f0f0",
-        darkcolor="#8a8a8a",
-        sliderthickness=9,
+        background="#ffffff",
+        troughcolor="#1f1f1f",
+        bordercolor="#1f1f1f",
+        lightcolor="#ffffff",
+        darkcolor="#ffffff",
+        sliderthickness=10,
     )
     style.map(
         "Mono.Horizontal.TScale",
@@ -265,7 +275,7 @@ class _OptionBase(tk.Frame):
         if on:
             self._canvas.create_line(
                 3.5, 8.5, 6.5, 11.5, 12.5, 4.5,
-                fill="#ffffff", width=2, capstyle="round", joinstyle="round",
+                fill="#000000", width=2, capstyle="round", joinstyle="round",
             )
 
 
@@ -304,27 +314,25 @@ class DarkRadio(_OptionBase):
 
 
 def build_status_bar(root: tk.Misc):
-    """Строка состояния как в Windows: серый фон, вдавленная рамка, две панели."""
-    bar = tk.Frame(root, bg="SystemButtonFace", bd=1, relief="sunken")
+    """Плоская строка состояния в стиле Windows 11: тёмная, без объёма."""
+    bar = tk.Frame(root, bg=BG_ALT, bd=0, highlightthickness=1, highlightbackground=BORDER)
     left = tk.Label(
         bar,
-        bg="SystemButtonFace",
-        fg="SystemWindowText",
+        bg=BG_ALT,
+        fg=FG_DIM,
         anchor="w",
-        padx=8,
-        pady=2,
+        padx=10,
+        pady=4,
     )
     left.pack(side="left", fill="x", expand=True)
     right = tk.Label(
         bar,
-        bg="SystemButtonFace",
-        fg="SystemWindowText",
+        bg=BG_ALT,
+        fg=FG,
         anchor="center",
-        padx=10,
-        pady=2,
+        padx=12,
+        pady=4,
         width=18,
-        bd=1,
-        relief="sunken",
     )
     right.pack(side="right", padx=(4, 2), pady=2)
     return bar, left, right

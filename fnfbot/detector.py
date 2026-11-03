@@ -68,57 +68,51 @@ class ArrowDetector:
 
 
 class ColorDetector:
-    """Детектор по цвету: сравнивает RGB, а не яркость.
+    """Детектор по точному цвету ноты.
 
-    Нужен для карт, где ноты переливаются. Такая нота может совпасть
-    с фоном по яркости, но по каналам R/G/B отличается сильно.
-    Порог «цвет» — максимальная разница по каналу (0..255).
+    У каждого направления свой цвет (левая нота фиолетовая, нижняя голубая
+    и т. д.). Бот считает, какая доля пикселей области близка к этому цвету:
+    фон приёмника в него не попадает, а пришедшая нота даёт резкий скачок.
+    Эталон не нужен — цвет задаётся в настройках.
     """
 
     def __init__(self, arrow: ArrowConfig):
         self.arrow = arrow
-        self._baseline: Optional[np.ndarray] = None
+        self._target: Optional[np.ndarray] = None
         self.reload_baseline()
 
     def reload_baseline(self) -> None:
-        base = self.arrow.get_baseline_rgb()
-        self._baseline = None if base is None else base.astype(np.int16)
+        rgb = self.arrow.note_rgb()
+        self._target = None if rgb is None else np.array(rgb, dtype=np.int16)
 
     @property
     def has_baseline(self) -> bool:
-        return self._baseline is not None
+        # Имя оставлено для движка: детектор готов, если задан цвет ноты.
+        return self._target is not None
 
     @property
     def baseline_shape(self):
-        return None if self._baseline is None else self._baseline.shape[:2]
+        return None
 
-    def _fit(self, shape) -> Optional[np.ndarray]:
-        if self._baseline is None:
-            return None
-        h, w = int(shape[0]), int(shape[1])
-        bh, bw = self._baseline.shape[:2]
-        if h == bh and w == bw:
-            return self._baseline
-        if h < 1 or w < 1:
-            return None
-        ys = (np.arange(h) * bh) // h
-        xs = (np.arange(w) * bw) // w
-        return self._baseline[np.ix_(ys, xs)]
+    @property
+    def target(self) -> Optional[np.ndarray]:
+        return None if self._target is None else self._target.copy()
 
     def score(self, rgb: np.ndarray) -> float:
-        """0..100 — доля пикселей, у которых цвет отличается от эталона."""
-        if rgb is None or rgb.ndim != 3 or not self.has_baseline:
+        """0..100 — доля пикселей, попавших в допуск вокруг цвета ноты."""
+        if rgb is None or rgb.ndim != 3 or self._target is None:
             return 0.0
-        base = self._fit(rgb.shape)
-        if base is None:
-            return 0.0
-        diff = np.abs(rgb.astype(np.int16) - base)
-        channel = diff.max(axis=2)
-        changed = int(np.count_nonzero(channel > int(self.arrow.color_threshold)))
-        total = int(channel.size)
+        # int32 обязателен: 255² не влезает в int16 и переполняет квадрат.
+        diff = rgb[..., :3].astype(np.int32) - self._target.astype(np.int32)
+        # евклидово расстояние в RGB: допускает лёгкую тень и подсветку.
+        # Сравниваем квадраты — так быстрее и без корня/NaN.
+        limit = float(self.arrow.color_threshold)
+        squared = np.sum(diff * diff, axis=2)
+        hit = int(np.count_nonzero(squared <= limit * limit))
+        total = int(squared.size)
         if total <= 0:
             return 0.0
-        return changed * 100.0 / float(total)
+        return hit * 100.0 / float(total)
 
     def matches(self, rgb: np.ndarray) -> bool:
         return self.score(rgb) >= float(self.arrow.area_threshold)

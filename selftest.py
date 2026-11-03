@@ -20,7 +20,14 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 import fnfbot.engine as engine_mod
-from fnfbot.config import DIRECTIONS, ArrowConfig, BotConfig
+from fnfbot.config import (
+    DEFAULT_NOTE_COLORS,
+    DIRECTIONS,
+    ArrowConfig,
+    BotConfig,
+    normalize_color,
+    parse_color,
+)
 from fnfbot.detector import ArrowDetector, ColorDetector
 from fnfbot.holds import HoldController
 from fnfbot.hotkeys import parse_hotkey
@@ -102,6 +109,34 @@ def test_config_roundtrip() -> None:
     check("привязка скриншота сохранилась", loaded.map_rect() == (10, 20, 800, 600))
     check("битый путь не ломает загрузку", BotConfig.load(os.path.join("нет", "такого.json")).arrows)
 
+    # --- цвета нот ---
+    check("цвет разбирается", parse_color("#12FA05") == (18, 250, 5))
+    check("короткий цвет разбирается", parse_color("f0f") == (255, 0, 255))
+    check("цвет с решёткой и пробелами", parse_color("  #00FFFF ") == (0, 255, 255))
+    check("мусор вместо цвета", parse_color("нет") is None)
+    check("цвет нормализуется", normalize_color("ABC") == "#aabbcc")
+    check(
+        "у каждой ноты свой стандартный цвет",
+        len({DEFAULT_NOTE_COLORS[d] for d in DIRECTIONS}) == 4,
+    )
+    cfg.arrows["left"].note_color = "#123456"
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "config.json")
+        cfg.save(path)
+        reloaded = BotConfig.load(path)
+    check("цвет ноты сохранился", reloaded.arrows["left"].note_color == "#123456")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "old.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"arrows": {"left": {"key": "a", "color_threshold": 40}}}, fh)
+        old = BotConfig.load(path)
+    check(
+        "старый конфиг получает стандартный цвет",
+        old.arrows["left"].note_color == DEFAULT_NOTE_COLORS["left"],
+    )
+    check("старый конфиг получает новый допуск", old.arrows["left"].color_threshold == 60)
+
 
 def test_keys() -> None:
     print("[клавиши]")
@@ -169,6 +204,8 @@ class FakeGrabber:
                 image[5:15, 5:15] = (0, 102, 0)
             elif kind == "tail":
                 image[2:28, 8:22] = (0, 102, 0)
+            elif kind == "thintail":
+                image[12:17, 12:17] = (0, 102, 0)
             elif kind == "weak":
                 image[5:11, 5:11] = (0, 102, 0)
             return image
@@ -179,6 +216,10 @@ class FakeGrabber:
         if kind == "tail":
             image = self.idle.copy()
             image[2:28, 8:22] = 250
+            return image
+        if kind == "thintail":
+            image = self.idle.copy()
+            image[12:17, 12:17] = 250
             return image
         if kind == "weak":
             image = self.idle.copy()
@@ -485,13 +526,58 @@ def test_chords() -> None:
     check("двойная нота: движок не упал", eng.error is None, str(eng.error))
 
 
-def test_color_mode() -> None:
-    """Цветной режим: нота совпадает с фоном по яркости, но не по цвету."""
-    print("[распознавание по цвету]")
+def test_slide_hold() -> None:
+    """Слайд держится, даже если хвост тоньше головы и не добирает мин. площадь."""
+    print("[слайды]")
 
-    base_rgb = np.dstack([np.full((30, 30), 60, dtype=np.uint8)] * 3)
-    frame_rgb = base_rgb.copy()
-    frame_rgb[5:15, 5:15] = (0, 102, 0)
+    cfg = BotConfig()
+    for d in DIRECTIONS:
+        cfg.arrows[d].set_rect(0, 0, 30, 30)
+        cfg.arrows[d].enabled = d == "left"
+        cfg.arrows[d].key = "a"
+        cfg.arrows[d].pixel_threshold = 25
+        cfg.arrows[d].area_threshold = 5.0
+        cfg.arrows[d].cooldown_ms = 0
+        cfg.arrows[d].hold_ms = 20
+        cfg.arrows[d].hold_grace_ms = 60
+        cfg.arrows[d].hold_max_ms = 3000
+        cfg.arrows[d].slide = True
+        cfg.arrows[d].set_baseline(np.full((30, 30), 60, dtype=np.uint8), "screen")
+    cfg.trigger_mode = "edge"
+    cfg.countdown_sec = 0
+
+    engine_mod.RegionGrabber = FakeGrabber
+    sender = FakeSender()
+    engine_mod.KeySender = lambda: sender
+
+    FakeGrabber.script = ["idle", "note"] + ["thintail"] * 40 + ["idle"] * 40
+    eng = engine_mod.Engine(cfg, send_keys=True, countdown=False, verbose=False)
+    eng.start()
+    time.sleep(0.45)
+    eng.stop()
+    eng.join(timeout=2)
+
+    downs = [t for kind, _k, t in FakeSender.events if kind == "down"]
+    ups = [t for kind, _k, t in FakeSender.events if kind == "up"]
+    check("слайд: нажатие одно", len(downs) == 1, str(FakeSender.events))
+    check("слайд: клавиша отпущена", len(ups) >= 1, str(FakeSender.events))
+    held = (ups[0] - downs[0]) if downs and ups else 0.0
+    check("слайд держится, а не тапается", held >= 0.12, f"{held * 1000:.0f} мс")
+
+
+def test_color_mode() -> None:
+    """Цветной режим: у каждой ноты свой точный цвет, эталон не нужен."""
+    print("[распознавание по цвету ноты]")
+
+    idle = np.dstack([np.full((30, 30), 60, dtype=np.uint8)] * 3)
+
+    def frame_with(color, box=(5, 15, 5, 15)):
+        image = idle.copy()
+        y0, y1, x0, x1 = box
+        image[y0:y1, x0:x1] = color
+        return image
+
+    frame_rgb = frame_with((0, 102, 0))
 
     # та же нота в оттенках серого — как её увидит пиксельный режим
     gray = (
@@ -500,30 +586,43 @@ def test_color_mode() -> None:
         + frame_rgb[..., 2].astype(np.uint16) * 29
     ) >> 8
     gray = gray.astype(np.uint8)
+    gray_arrow = ArrowConfig(pixel_threshold=25, area_threshold=5.0)
+    gray_arrow.set_baseline(np.full((30, 30), 60, dtype=np.uint8), "screen")
+    pixel = ArrowDetector(gray_arrow)
 
-    arrow = ArrowConfig(pixel_threshold=25, color_threshold=40, area_threshold=5.0)
-    arrow.set_baseline(np.full((30, 30), 60, dtype=np.uint8), "screen")
-    arrow.set_baseline_rgb(base_rgb, "screen")
-    pixel = ArrowDetector(arrow)
+    arrow = ArrowConfig(note_color="#006600", color_threshold=40, area_threshold=5.0)
     color = ColorDetector(arrow)
-
-    check("цвет: эталон читается", color.has_baseline)
-    check(
-        "цвет: пустой кадр даёт 0%",
-        color.score(base_rgb) == 0.0,
-        f"{color.score(base_rgb)}",
+    strict = ColorDetector(
+        ArrowConfig(note_color="#006600", color_threshold=10, area_threshold=5.0)
+    )
+    wrong = ColorDetector(
+        ArrowConfig(note_color="#c24b99", color_threshold=40, area_threshold=5.0)
     )
 
-    pixel_score = pixel.score(gray)
-    color_score = color.score(frame_rgb)
+    check("цвет: детектор готов без эталона", color.has_baseline)
+    check("цвет: пустой приёмник 0%", color.score(idle) == 0.0, f"{color.score(idle)}")
     check(
         "пиксельный режим не видит ноту той же яркости",
-        pixel_score < 1.0,
-        f"{pixel_score}",
+        pixel.score(gray) < 1.0,
+        f"{pixel.score(gray)}",
     )
-    check("цветной режим видит её", color_score > 5.0, f"{color_score}")
+    check(
+        "цветной режим видит ноту нужного цвета",
+        color.score(frame_rgb) > 5.0,
+        f"{color.score(frame_rgb)}",
+    )
     check("цвет: срабатывание по площади", color.matches(frame_rgb))
-    check("цвет: без эталона 0%", ColorDetector(ArrowConfig()).score(frame_rgb) == 0.0)
+    check(
+        "цвет: тень ноты попадает в допуск",
+        color.score(frame_with((0, 88, 0))) > 5.0,
+        f"{color.score(frame_with((0, 88, 0)))}",
+    )
+    check(
+        "цвет: строгий допуск отсекает тень",
+        strict.score(frame_with((0, 88, 0))) == 0.0,
+    )
+    check("цвет: чужой цвет не ловится", wrong.score(frame_rgb) == 0.0)
+    check("цвет: без цвета ноты 0%", ColorDetector(ArrowConfig()).score(frame_rgb) == 0.0)
 
     # --- двигатель целиком ---
     cfg = BotConfig()
@@ -533,12 +632,12 @@ def test_color_mode() -> None:
         cfg.arrows[d].key = "a"
         cfg.arrows[d].pixel_threshold = 25
         cfg.arrows[d].color_threshold = 40
+        cfg.arrows[d].note_color = "#006600"
         cfg.arrows[d].area_threshold = 5.0
         cfg.arrows[d].cooldown_ms = 0
         cfg.arrows[d].hold_ms = 5
         cfg.arrows[d].slide = False
         cfg.arrows[d].set_baseline(np.full((30, 30), 60, dtype=np.uint8), "screen")
-        cfg.arrows[d].set_baseline_rgb(base_rgb, "screen")
     cfg.trigger_mode = "edge"
     cfg.countdown_sec = 0
 
@@ -554,7 +653,7 @@ def test_color_mode() -> None:
     eng.stop()
     eng.join(timeout=2)
     check(
-        "режим «пиксели» пропускает переливающуюся ноту",
+        "режим «пиксели» пропускает ноту той же яркости",
         len(FakeSender.presses) == 0,
         str(FakeSender.presses),
     )
@@ -569,16 +668,16 @@ def test_color_mode() -> None:
     eng2.join(timeout=2)
     states, _status, _fps, error = eng2.snapshot()
     check(
-        "режим «цвет» ловит переливающуюся ноту",
+        "режим «цвет нот» ловит ноту по цвету",
         len(FakeSender.presses) == 2,
         str(FakeSender.presses),
     )
     check(
-        "режим «цвет»: счётчик срабатываний",
+        "режим «цвет нот»: счётчик срабатываний",
         states["left"]["hits"] == 2,
         str(states["left"]),
     )
-    check("режим «цвет» не падает", error is None, str(error))
+    check("режим «цвет нот» не падает", error is None, str(error))
 
 
 def main() -> int:
@@ -589,6 +688,7 @@ def main() -> int:
     test_layout_independent_keys()
     test_engine_logic()
     test_slides()
+    test_slide_hold()
     test_chords()
     test_color_mode()
     print()

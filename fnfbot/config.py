@@ -17,7 +17,39 @@ from . import APP_DIR
 DIRECTIONS: Tuple[str, ...] = ("left", "down", "up", "right")
 DIR_LABELS = {"left": "Лево", "down": "Вниз", "up": "Вверх", "right": "Право"}
 DEFAULT_KEYS = {"left": "a", "down": "s", "up": "w", "right": "d"}
+
+# Стандартные цвета нот FNF: их можно поменять под свою игру.
+DEFAULT_NOTE_COLORS = {
+    "left": "#c24b99",   # фиолетовая
+    "down": "#00ffff",   # голубая
+    "up": "#12fa05",     # зелёная
+    "right": "#f9393f",  # красная
+}
+
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
+
+
+def parse_color(text) -> Optional[Tuple[int, int, int]]:
+    """'#rrggbb' / 'rrggbb' / '#rgb' -> (r, g, b). None, если это не цвет."""
+    if not isinstance(text, str):
+        return None
+    value = text.strip().lstrip("#").strip()
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
+    if len(value) != 6:
+        return None
+    try:
+        return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+    except ValueError:
+        return None
+
+
+def normalize_color(text, fallback: str = "#ffffff") -> str:
+    """Приводит цвет к виду '#rrggbb' или возвращает fallback."""
+    rgb = parse_color(text)
+    if rgb is None:
+        rgb = parse_color(fallback) or (255, 255, 255)
+    return "#{:02x}{:02x}{:02x}".format(*rgb)
 
 
 def _as_int(value, default: int, low: int, high: int) -> int:
@@ -46,12 +78,13 @@ class ArrowConfig:
     hold_ms: int = 30           # сколько держать клавишу (1 мс игра часто не успевает увидеть)
     cooldown_ms: int = 60       # минимальный интервал между нажатиями
     pixel_threshold: int = 28   # насколько пиксель должен измениться (0..255)
-    color_threshold: int = 40   # цветовой режим: насколько должен отличаться канал RGB
-    area_threshold: float = 6.0  # какой % пикселей области должен измениться
+    color_threshold: int = 60   # цвет: насколько пиксель может отличаться от цвета ноты
+    area_threshold: float = 6.0  # какой % пикселей области должен «попасть в цвет»
     release_ratio: float = 0.5  # во сколько раз должно упасть изменение для перевзвода
     slide: bool = True          # держать клавишу, пока через приёмник идёт слайдер
-    hold_grace_ms: int = 80     # сколько полоса над приёмником должна молчать, чтобы отпустить
+    hold_grace_ms: int = 120    # сколько полоса над приёмником должна молчать, чтобы отпустить
     hold_max_ms: int = 8000     # страховка от залипания клавиши
+    note_color: str = ""        # точный цвет ноты («#rrggbb»), нужен режиму «цвет»
     baseline: str = ""          # base64 от grayscale-эталона
     baseline_size: list = field(default_factory=lambda: [0, 0])  # [высота, ширина]
     baseline_rgb: str = ""      # base64 от цветного эталона (RGB)
@@ -124,6 +157,10 @@ class ArrowConfig:
     def has_baseline_rgb(self) -> bool:
         return self.get_baseline_rgb() is not None
 
+    # --- цвет ноты (режим «цвет») ---
+    def note_rgb(self) -> Optional[Tuple[int, int, int]]:
+        return parse_color(self.note_color)
+
     def clear_baseline(self) -> None:
         self.baseline = ""
         self.baseline_rgb = ""
@@ -145,6 +182,7 @@ class ArrowConfig:
             "slide": self.slide,
             "hold_grace_ms": self.hold_grace_ms,
             "hold_max_ms": self.hold_max_ms,
+            "note_color": self.note_color,
             "baseline": self.baseline,
             "baseline_rgb": self.baseline_rgb,
             "baseline_size": self.baseline_size,
@@ -163,12 +201,14 @@ class ArrowConfig:
         cfg.hold_ms = _as_int(data.get("hold_ms"), 30, 1, 500)
         cfg.cooldown_ms = _as_int(data.get("cooldown_ms"), 60, 0, 2000)
         cfg.pixel_threshold = _as_int(data.get("pixel_threshold"), 28, 1, 254)
-        cfg.color_threshold = _as_int(data.get("color_threshold"), 40, 1, 254)
+        cfg.color_threshold = _as_int(data.get("color_threshold"), 60, 1, 255)
         cfg.area_threshold = _as_float(data.get("area_threshold"), 6.0, 0.1, 100.0)
         cfg.release_ratio = _as_float(data.get("release_ratio"), 0.5, 0.1, 0.95)
         cfg.slide = bool(data.get("slide", True))
-        cfg.hold_grace_ms = _as_int(data.get("hold_grace_ms"), 80, 20, 600)
+        cfg.hold_grace_ms = _as_int(data.get("hold_grace_ms"), 120, 20, 600)
         cfg.hold_max_ms = _as_int(data.get("hold_max_ms"), 8000, 200, 30000)
+        color = str(data.get("note_color") or "").strip()
+        cfg.note_color = normalize_color(color) if parse_color(color) else ""
         cfg.baseline = str(data.get("baseline") or "")
         cfg.baseline_rgb = str(data.get("baseline_rgb") or "")
         size = list(data.get("baseline_size") or [0, 0])
@@ -181,7 +221,10 @@ class ArrowConfig:
 @dataclass
 class BotConfig:
     arrows: Dict[str, ArrowConfig] = field(
-        default_factory=lambda: {d: ArrowConfig(key=DEFAULT_KEYS[d]) for d in DIRECTIONS}
+        default_factory=lambda: {
+            d: ArrowConfig(key=DEFAULT_KEYS[d], note_color=DEFAULT_NOTE_COLORS[d])
+            for d in DIRECTIONS
+        }
     )
     trigger_mode: str = "edge"   # "edge" — по фронту изменения, "cooldown" — по кулдауну
     detect_mode: str = "pixel"   # "pixel" — сравнение яркости, "color" — сравнение цвета
@@ -249,7 +292,14 @@ class BotConfig:
             for d in DIRECTIONS:
                 item = arrows.get(d)
                 if isinstance(item, dict):
-                    cfg.arrows[d] = ArrowConfig.from_dict(item)
+                    arrow = ArrowConfig.from_dict(item)
+                    # Старые конфиги не знали о цветах нот: подставляем стандартный
+                    # цвет и более мягкий допуск.
+                    if not arrow.note_color:
+                        arrow.note_color = DEFAULT_NOTE_COLORS[d]
+                        if _as_int(item.get("color_threshold"), 40, 1, 255) == 40:
+                            arrow.color_threshold = 60
+                    cfg.arrows[d] = arrow
         mode = str(data.get("trigger_mode") or "edge")
         cfg.trigger_mode = mode if mode in ("edge", "cooldown") else "edge"
         detect = str(data.get("detect_mode") or "pixel")
