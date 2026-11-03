@@ -16,4 +16,4 @@ else:
 # Ресурсы, упакованные внутрь exe (иконка и т. п.).
 RESOURCE_DIR = getattr(sys, "_MEIPASS", APP_DIR)
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"

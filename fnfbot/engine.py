@@ -219,12 +219,22 @@ class Engine(threading.Thread):
                     above = score >= threshold
                     was_above = self._above[d]
 
-                    # Удержание: сигнал берём из самого приёмника. Хвост слайдера
-                    # тоньше головы и может не добирать «Мин. площадь», поэтому
-                    # при уже зажатой клавише используем пониженный порог — иначе
-                    # бот отпускает слайд как обычную ноту.
-                    hold_floor = max(0.05, threshold * 0.35)
-                    hold_signal = above or (hold.active and score >= hold_floor)
+                    # Удержание слайда. В цветном режиме хвост может быть темнее
+                    # головы (полупрозрачный/в тени), поэтому кроме точного цвета
+                    # принимаем «тот же оттенок» и используем низкий порог: хвост
+                    # тоньше ноты и иначе не добирает «Мин. площадь», из-за чего
+                    # слайд тапался как обычная нота.
+                    if color_mode:
+                        hold_floor = max(0.8, threshold * 0.15)
+                        hold_signal = above
+                        if hold.active and not hold_signal:
+                            hold_signal = (
+                                score >= hold_floor
+                                or det.shade_score(frame) >= hold_floor
+                            )
+                    else:
+                        hold_floor = max(0.05, threshold * 0.35)
+                        hold_signal = above or (hold.active and score >= hold_floor)
                     if hold.active and hold.update(now, hold_signal):
                         forced = hold.held_for(now) >= arrow.hold_max_ms / 1000.0 - 0.02
                         if self._sender is not None and arrow.key:

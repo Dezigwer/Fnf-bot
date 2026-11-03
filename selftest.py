@@ -206,6 +206,9 @@ class FakeGrabber:
                 image[2:28, 8:22] = (0, 102, 0)
             elif kind == "thintail":
                 image[12:17, 12:17] = (0, 102, 0)
+            elif kind == "darktail":
+                # полупрозрачный хвост: тот же оттенок, но темнее
+                image[2:28, 10:20] = (0, 46, 0)
             elif kind == "weak":
                 image[5:11, 5:11] = (0, 102, 0)
             return image
@@ -565,6 +568,74 @@ def test_slide_hold() -> None:
     check("слайд держится, а не тапается", held >= 0.12, f"{held * 1000:.0f} мс")
 
 
+def test_color_slide_hold() -> None:
+    """Цветной режим: слайд держится, даже если хвост темнее головы ноты."""
+    print("[слайды в режиме «цвет нот»]")
+
+    idle = np.dstack([np.full((30, 30), 60, dtype=np.uint8)] * 3)
+    note = idle.copy()
+    note[5:15, 5:15] = (0, 102, 0)
+    dark_tail = idle.copy()
+    dark_tail[2:28, 10:20] = (0, 46, 0)
+
+    arrow = ArrowConfig(note_color="#006600", color_threshold=40, area_threshold=5.0)
+    det = ColorDetector(arrow)
+    check(
+        "тёмный хвост: точный цвет не совпадает",
+        det.score(dark_tail) < 1.0,
+        f"{det.score(dark_tail):.1f}%",
+    )
+    check(
+        "тёмный хвост виден по оттенку",
+        det.shade_score(dark_tail) > 5.0,
+        f"{det.shade_score(dark_tail):.1f}%",
+    )
+    check("пустой приёмник: оттенка нет", det.shade_score(idle) == 0.0)
+    grey = idle.copy()
+    grey[5:15, 5:15] = (60, 60, 60)
+    check("серый фон не считается оттенком ноты", det.shade_score(grey) == 0.0)
+
+    cfg = BotConfig()
+    for d in DIRECTIONS:
+        cfg.arrows[d].set_rect(0, 0, 30, 30)
+        cfg.arrows[d].enabled = d == "left"
+        cfg.arrows[d].key = "a"
+        cfg.arrows[d].pixel_threshold = 25
+        cfg.arrows[d].color_threshold = 40
+        cfg.arrows[d].note_color = "#006600"
+        cfg.arrows[d].area_threshold = 5.0
+        cfg.arrows[d].cooldown_ms = 0
+        cfg.arrows[d].hold_ms = 20
+        cfg.arrows[d].hold_grace_ms = 60
+        cfg.arrows[d].hold_max_ms = 3000
+        cfg.arrows[d].slide = True
+    cfg.trigger_mode = "edge"
+    cfg.detect_mode = "color"
+    cfg.countdown_sec = 0
+
+    engine_mod.RegionGrabber = FakeGrabber
+    sender = FakeSender()
+    engine_mod.KeySender = lambda: sender
+
+    FakeGrabber.script = ["idle", "note"] + ["darktail"] * 40 + ["idle"] * 40
+    eng = engine_mod.Engine(cfg, send_keys=True, countdown=False, verbose=False)
+    eng.start()
+    time.sleep(0.45)
+    eng.stop()
+    eng.join(timeout=2)
+
+    downs = [t for kind, _k, t in FakeSender.events if kind == "down"]
+    ups = [t for kind, _k, t in FakeSender.events if kind == "up"]
+    check("цветной слайд: нажатие одно", len(downs) == 1, str(FakeSender.events))
+    check("цветной слайд: клавиша отпущена", len(ups) >= 1, str(FakeSender.events))
+    held = (ups[0] - downs[0]) if downs and ups else 0.0
+    check(
+        "цветной слайд держится, а не тапается",
+        held >= 0.12,
+        f"{held * 1000:.0f} мс",
+    )
+
+
 def test_color_mode() -> None:
     """Цветной режим: у каждой ноты свой точный цвет, эталон не нужен."""
     print("[распознавание по цвету ноты]")
@@ -689,6 +760,7 @@ def main() -> int:
     test_engine_logic()
     test_slides()
     test_slide_hold()
+    test_color_slide_hold()
     test_chords()
     test_color_mode()
     print()

@@ -79,11 +79,22 @@ class ColorDetector:
     def __init__(self, arrow: ArrowConfig):
         self.arrow = arrow
         self._target: Optional[np.ndarray] = None
+        self._chroma: Optional[np.ndarray] = None
+        self._brightness = 0.0
         self.reload_baseline()
 
     def reload_baseline(self) -> None:
         rgb = self.arrow.note_rgb()
-        self._target = None if rgb is None else np.array(rgb, dtype=np.int16)
+        if rgb is None:
+            self._target = None
+            self._chroma = None
+            self._brightness = 0.0
+            return
+        self._target = np.array(rgb, dtype=np.int32)
+        # «Оттенок» как доля каждого канала: не зависит от яркости.
+        total = float(sum(rgb)) or 1.0
+        self._chroma = np.array([c / total for c in rgb], dtype=np.float32)
+        self._brightness = float(max(rgb))
 
     @property
     def has_baseline(self) -> bool:
@@ -113,6 +124,29 @@ class ColorDetector:
         if total <= 0:
             return 0.0
         return hit * 100.0 / float(total)
+
+    def shade_score(self, rgb: np.ndarray) -> float:
+        """0..100 — доля пикселей «того же оттенка», но любой яркости.
+
+        Хвост слайдера часто темнее головы: он полупрозрачный или лежит в тени.
+        Точный RGB тогда не совпадает, а оттенок сохраняется — затемнение
+        умножает все каналы на одно число, и их соотношение не меняется.
+        Слишком тёмные пиксели (фон) отсекаются порогом яркости, иначе тёмная
+        дорожка того же цвета держала бы клавишу вечно.
+        """
+        if rgb is None or rgb.ndim != 3 or self._chroma is None:
+            return 0.0
+        px = rgb[..., :3].astype(np.float32)
+        bright = px.max(axis=2)
+        total = px.sum(axis=2) + 1e-6
+        norm = px / total[..., None]
+        dist = np.sqrt(np.sum((norm - self._chroma) ** 2, axis=2)) * 255.0
+        floor_bright = max(16.0, self._brightness * 0.35)
+        hit = int(np.count_nonzero((dist <= 22.0) & (bright >= floor_bright)))
+        size = int(bright.size)
+        if size <= 0:
+            return 0.0
+        return hit * 100.0 / float(size)
 
     def matches(self, rgb: np.ndarray) -> bool:
         return self.score(rgb) >= float(self.arrow.area_threshold)
